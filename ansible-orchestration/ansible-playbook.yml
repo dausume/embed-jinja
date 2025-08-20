@@ -1,0 +1,85 @@
+- name: Generate Falcon API configuration
+  hosts: localhost
+  connection: local
+
+  vars_files:
+    - ../setup.yml
+
+  vars:
+    current_setup_default_env: dev
+
+  pre_tasks:
+    - name: Resolve active environment name
+      set_fact:
+        active_env_name: >-
+          {{
+            (vars['current-setup'].env | default(current_setup_default_env))
+            if ('current-setup' in vars) else current_setup_default_env
+          }}
+
+    - name: Resolve environment vars object (selected env)
+      set_fact:
+        active_env_vars: "{{ environments[active_env_name] | default({}) }}"
+
+    - name: Build project list from selected environment
+      set_fact:
+        project_list: >-
+          {{
+            (active_env_vars.projects | default({}))
+            | dict2items(key_name='name', value_name='cfg')
+          }}
+
+  tasks:
+    - name: Reset "Ansible_Done" flag
+      ansible.builtin.lineinfile:
+        path: ./ansible-ready.env
+        regex: '^IS_ANSIBLE_DONE='
+        line: 'IS_ANSIBLE_DONE=false'
+        create: true
+        state: present
+
+    # ------- Working debug tasks -------
+    - name: Debug projects (list)
+      ansible.builtin.debug:
+        msg: "project_list : {{ project_list | map(attribute='name') | list }}"
+
+    - name: Debug each project with name, object, and path
+      ansible.builtin.debug:
+        msg: |
+          Name: {{ item.name }}
+          Object: {{ item | to_nice_json }}
+          Path: {{ item.cfg.path | default('N/A') }}
+      loop: "{{ project_list }}"
+
+    - name: Debug environments (selected)
+      ansible.builtin.debug:
+        msg:
+          - "active_env_name={{ active_env_name }}"
+          - "active_env_vars keys={{ active_env_vars.keys() | list }}"
+
+    - name: Debug current-setup
+      ansible.builtin.debug:
+        var: vars['current-setup']
+    # -----------------------------------
+
+    # Loop the include (allowed), not the block (not allowed)
+    - name: Process each project
+      ansible.builtin.include_tasks: per_project.yml
+      loop: "{{ project_list }}"
+      loop_control:
+        loop_var: project
+        label: "{{ project.name }}"
+      vars:
+        proj_root: "{{ (project.cfg.path | default('.')) | realpath }}"
+        env_ctx: "{{ active_env_vars }}"   # pass env dict to included tasks
+        env_name: "{{ active_env_name }}"  # <-- add this
+        # NEW: absolute roots of all projects
+        all_dirs: "{{ project_list | map(attribute='cfg.path') | map('realpath') | list }}"
+
+    - name: Set "Ansible Done" flag
+      ansible.builtin.lineinfile:
+        path: ./ansible-ready.env
+        regex: '^IS_ANSIBLE_DONE='
+        line: 'IS_ANSIBLE_DONE=true'
+        create: true
+        state: present

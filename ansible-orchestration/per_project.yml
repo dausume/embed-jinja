@@ -1,0 +1,139 @@
+---
+# per_project.yml — runs once per project (included with loop_var=project)
+
+# Debug current project root
+- name: Debug — proj_root
+  ansible.builtin.debug:
+    var: proj_root
+
+# Build exclude list = all_dirs minus this proj_root, keep only paths under this proj_root
+- name: Compute exclude_dirs (all other project roots)
+  ansible.builtin.set_fact:
+    exclude_dirs: "{{ all_dirs | difference([proj_root]) }}"
+
+
+- name: Debug — exclude_dirs
+  ansible.builtin.debug:
+    var: exclude_dirs
+
+# Create baseline jinja-templates and jinja-build/ directories for the project.
+- name: Create jinja-templates/ and jinja-build/
+  ansible.builtin.file:
+    path: "{{ proj_root }}/{{ item }}"
+    state: directory
+  loop:
+    - jinja-templates
+    - jinja-build
+
+- name: Debug - Check playbook_dir
+  ansible.builtin.debug:
+    var: playbook_dir
+
+# Detect with excludes
+- name: Detect embedded-jinja files for this project
+  ansible.builtin.command: >
+    {{ playbook_dir }}/embedded-jinja-detector.sh
+    {{ proj_root }}
+    {{ exclude_dirs | join(' ') }}
+  register: detected_jinja_files
+  changed_when: false
+  failed_when: detected_jinja_files.rc != 0
+
+
+- name: Build list from detector output
+  ansible.builtin.set_fact:
+    ej_files: "{{ (detected_jinja_files.stdout | trim) | ternary((detected_jinja_files.stdout | trim).split('\n'), []) }}"
+
+- name: Debug — detected embedded-jinja files
+  ansible.builtin.debug:
+    var: ej_files
+
+# Create per-file jinja-templates parent dirs BEFORE preprocessing
+#- name: Ensure jinja-templates destination parents exist
+#  ansible.builtin.file:
+#    path: >-
+#      {{
+#        (
+#          proj_root ~ '/jinja-templates/' ~
+#          (
+#            item | regex_replace('^' ~ (proj_root | regex_escape) ~ '/?', '')
+#          )
+#        ) ~ '.j2' | dirname
+#      }}
+#    state: directory
+#    mode: "0755"
+#  loop: "{{ ej_files }}"
+#  when: ej_files | length > 0
+
+# Processes known files where embedded-jinja exists and generates/overwrites the existing templates
+# in the project's {{proj_root}}/jinja-templates directory, using the {{proj_root}}/relative/path to make a duplicate
+# build structure that overlaps with the original inside jinja-build/ like {{proj_root}}/jinja-templates/relative/path
+# Generate/overwrite templates under {{ proj_root }}/jinja-templates/***.j2
+- name: Preprocess each file → jinja-templates/
+  ansible.builtin.command: "{{ playbook_dir }}/embed-jinja-file-processor.sh {{ proj_root }} {{ item }}"
+  loop: "{{ ej_files }}"
+  register: preprocess_out
+  changed_when: "'updated template:' in (preprocess_out.stdout | default(''))"
+  when: ej_files | length > 0
+
+
+
+- name: Find generated .j2 templates
+  ansible.builtin.find:
+    paths: "{{ proj_root }}/jinja-templates"
+    patterns: "*.j2"
+    recurse: true
+  register: templates_found
+
+# Print out the generated j2 templates for debugging.
+- name: Debug — generated .j2 templates
+  ansible.builtin.debug:
+    msg: "{{ templates_found.files | map(attribute='path') | list }}"
+
+# Promote environment dict (env_ctx) to top-level vars for this include scope (skip 'projects')
+- name: Promote selected environment vars to task facts
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ (env_ctx | default({})) | dict2items | rejectattr('key','equalto','projects') | list }}"
+  when: env_ctx is defined
+
+# Ensure env_name is available in templates
+- name: Expose env_name
+  ansible.builtin.set_fact:
+    env_name: "{{ env_name }}"
+
+# We need to also handle the scenario where no files are detected and just skip the project.
+# Ensure each destination folder exists (template won’t create parents)
+# Ensure jinja-build destination parents exist
+- name: Ensure jinja-build destination directories exist
+  ansible.builtin.file:
+    path: >-
+      {{
+        (
+          proj_root ~ '/jinja-build/' ~
+          (item.path
+            | replace(proj_root ~ '/jinja-templates/', '')
+            | regex_replace('\.j2$', '')
+          )
+        ) | dirname
+      }}
+    state: directory
+    mode: "0755"
+  loop: "{{ templates_found.files }}"
+  when: (templates_found.files | default([])) | length > 0
+
+# Render → jinja-build/
+- name: Render templates → jinja-build/
+  ansible.builtin.template:
+    src: "{{ item.path }}"
+    dest: >-
+      {{
+        proj_root ~ '/jinja-build/' ~
+        (item.path
+          | replace(proj_root ~ '/jinja-templates/', '')
+          | regex_replace('\.j2$', '')
+        )
+      }}
+    mode: "0644"
+  loop: "{{ templates_found.files }}"
+  when: (templates_found.files | default([])) | length > 0

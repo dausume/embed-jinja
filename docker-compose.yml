@@ -1,0 +1,18 @@
+## Runs from the context of the /jinja-build of <repo_root>
+# Jinja-Start
+# services:
+#   api:
+#     build:
+#       context: ..                      # repo root so Dockerfile can COPY from ansible-orchestration
+#       dockerfile: sample-falcon-app/Dockerfile
+#     entrypoint: ["sfa-entrypoint.sh"]   # your custom entrypoint
+#     environment:
+#       - BACKEND_PORT={{ backend_port }}
+#     ports:
+# {% if expose_backend_port_on_localhost %}
+#       - "127.0.0.1:{{ backend_port }}:{{ backend_port }}"
+# {% else %}
+#       - "{{ backend_port }}:{{ backend_port }}"
+# {% endif %}
+#     restart: unless-stopped
+# Jinja-End

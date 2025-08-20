@@ -1,0 +1,5 @@
+# Ignore all jinja build directories at any level
+**/jinja-build/
+
+# Ignore all jinja template directories at any level
+**/jinja-templates/
