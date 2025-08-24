@@ -1,0 +1,17 @@
+# setup.yml -> Core file for embed-jinja execution.
+current-setup:
+  env: dev
+
+environments:
+  dev:
+    backend_port: '8080'
+    expose_backend_port_on_localhost: true
+    projects:
+      embed-jinja: { path: . }
+      sample-falcon-app: { path: ./sample-falcon-app }
+  test:
+    backend_port: '9000'
+    expose_backend_port_on_localhost: true
+    projects:
+      embed-jinja: { path: . }
+      sample-falcon-app: { path: ./sample-falcon-app }

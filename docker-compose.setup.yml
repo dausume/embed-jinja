@@ -1,0 +1,12 @@
+# embedded-jinja/docker-compose.setup.yml
+#
+# This docker compose is explicitly meant for running the ansible container which allows us
+# to build dynamically for different network infrastructures and environments.
+services:
+  ansible-setup:
+    build:
+      dockerfile: Dockerfile.setup
+      context: .
+    volumes:
+      # Mount the entire project directory with all sub-projects into the Ansible Container
+      - .:/embed-jinja
