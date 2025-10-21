@@ -1,0 +1,58 @@
+# embed-jinja/docker-compose.auto.yml
+#
+# Automated workflow that:
+# 1. Runs ansible-setup to generate jinja-build/docker-compose.yml
+# 2. Automatically starts services from the generated compose file
+#
+# Usage:
+#   docker compose -f docker-compose.auto.yml up --build
+#
+services:
+  # Phase 1: Run Ansible setup to generate templates
+  ansible-setup:
+    build:
+      dockerfile: Dockerfile.setup
+      context: .
+    volumes:
+      # Mount the entire project directory with all sub-projects into the Ansible Container
+      - .:/embed-jinja
+      # Mount docker socket to allow this container to control docker
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+
+  # Phase 2: Orchestrator that waits for setup and launches generated compose
+  auto-launcher:
+    image: docker:cli
+    depends_on:
+      ansible-setup:
+        condition: service_completed_successfully
+    volumes:
+      - .:/embed-jinja
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /embed-jinja
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Ansible setup completed successfully!"
+        echo "Checking for generated docker-compose.yml..."
+
+        if [ -f "./jinja-build/docker-compose.yml" ]; then
+          echo "Found generated docker-compose.yml"
+          echo "Starting application services..."
+
+          # Start the generated compose file in detached mode
+          docker compose -f ./jinja-build/docker-compose.yml up --build -d
+
+          echo "Application services started!"
+          echo "To view logs: docker compose -f jinja-build/docker-compose.yml logs -f"
+          echo "To stop: docker compose -f jinja-build/docker-compose.yml down"
+        else
+          echo "ERROR: jinja-build/docker-compose.yml was not generated!"
+          exit 1
+        fi
+
+        # Keep this container running so it doesn't exit immediately
+        # This allows you to see the status in docker compose ps
+        echo "Auto-launcher monitoring active. Press Ctrl+C to stop."
+        tail -f /dev/null
